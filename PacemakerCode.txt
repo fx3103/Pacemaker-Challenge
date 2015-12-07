@@ -1,0 +1,475 @@
+// Pacemaker
+#include "mbed.h"
+#include "rtos.h"
+#include "TextLCD.h"
+#define visibility 1
+
+Serial pc(USBTX,USBRX);
+DigitalOut asignalLED(p10);
+DigitalOut vsignalLED(p11);
+DigitalOut apaceLED(p12);
+DigitalOut vpaceLED(p13);
+
+DigitalOut Model3da(p27);
+DigitalOut Model3dv(p28);
+
+TextLCD lcd( p15,p16, p17, p18, p19, p20, TextLCD::LCD16x2); // rs, e, d4, d5, d6, d7
+DigitalIn asignal(p5);
+DigitalIn vsignal(p6);
+DigitalOut apace(p7);
+DigitalOut vpace(p8);
+DigitalOut buzzer(p25);
+DigitalOut ready(p21); // To sync for test mode
+InterruptIn recAck(p22); // To receive ack for test mode
+DigitalIn connected1(p23);
+DigitalIn connected2(p24);
+unsigned int adone_man=0;
+unsigned int vdone_man=0;
+int avimin=30*visibility;
+int avimax=100*visibility;
+
+int pvarpmin=150*visibility;
+int pvarpmax=500*visibility;
+int pvrp= (pvarpmax-100)*visibility;
+bool asignal_flag=false;
+bool vsignal_flag=false;
+bool apace_flag=false;
+bool vpace_flag=false;
+// Sleep,Normal,Exercise, Manual
+int uri[4]={1000*1,600*1,343*1,343*1};
+int lri[4]={2000*1,1500*1,600*1,2000*1};
+enum mode{sleepm,normal,exercise,manual};
+char *modes[]={"Sleep","Normal","Exercise","Manual"};
+unsigned int adone=0;
+unsigned int vdone=0;
+bool testing=false;
+
+Timer timea;
+Timer timev;
+Timer t_test;
+int currentMode=normal;
+int count=0;
+
+ bool temp1=0;
+ bool temp2=0;
+bool apaceset=0;
+ bool vpaceset=0;
+bool manuallyControlled=false;
+bool connected3=false;
+bool connected4=false;
+
+
+int min(int a,int b)
+{
+    return a>b?b:a;
+}
+
+void buzzer_(const void *)
+{
+    while(1){
+        if(connected1==0 && connected2 ==0 && connected3==false && connected4==false){
+    buzzer=1;
+    }
+    else
+    {
+        buzzer=0;
+        }
+    }
+}
+
+void ObservationInterval()
+{
+    int interval=10;
+    
+    printf("The default waiting interval is 10s. Do you want to modify it? y or n?\n");
+    while(1)
+    {
+        if(pc.readable())
+        {
+            char x=pc.getc();
+            if(x=='y')
+            {
+                printf("Enter any interval. \n");
+                while(1)
+                {
+                    if(pc.readable())
+                {
+                   pc.scanf("%d",&interval);
+                   //pc.putc("");
+                   printf("Interval: %d\n",interval);
+                   break; 
+                    
+                }
+                }
+                
+                }
+                else{printf("Default rate set to 10.\n");}
+            break;
+            }
+            
+        }
+    count=0;
+    Timer t;
+    t.start();
+    while(t.read()<=interval);
+    count=count*((int)(60/interval));
+    printf("Heart Rate %d\n", count );
+    lcd.cls();
+    lcd.locate(0,0);
+    lcd.printf("HR: %d\n",count);
+    lcd.locate(0,1);
+    lcd.printf("Mode: %s\n",modes[currentMode]);
+
+}
+
+void interruptTestingReq()
+{
+    testing=true;   
+}
+
+
+
+
+
+void pacemakerThread(const void* n)
+{
+        Timer stamp;
+        Timer foruri; 
+        apace=0;
+        vpace=0;
+        Model3da=0;
+        Model3dv=0;
+        int adone=0;
+        int vdone=0;
+        timea.start();
+        timev.start();
+        unsigned int init_=0;
+        stamp.start();
+        int pvrp;
+        ready=0;
+        foruri.start();
+        while(1)
+    {
+        
+        if(testing==true)
+        {
+            
+            testing=false;
+            apace=0;
+            vpace=0;
+            apaceLED=0;
+            vpaceLED=0;
+            asignalLED=0;
+            vsignalLED=0;
+            Thread::wait(2000);
+            printf("Getting tested. In Sync Now\n");
+            timea.reset();
+            timev.reset();
+            init_=0;
+            ready=1;
+            
+        }
+        
+        
+        if(manuallyControlled==false){
+            if(init_!=0){
+        while(foruri.read_ms()<=uri[currentMode]);
+        }
+        }
+        foruri.reset();
+        init_=1;
+        pvrp= pvarpmin + rand()%(pvarpmax-pvarpmin);
+        while(timea.read_ms()<=pvrp);
+        while(timea.read_ms()<= lri[currentMode] - avimax - pvrp)
+        {
+        
+              if(asignal==1)
+              {
+               //last=timea.read_ms();
+               //printf("Pacemaker-Asignal Received! Global Time : %d \n", stamp.read_ms());
+               //printf("Asignal Received! Time stamp: %d Global Time: %d \n", last, stamp.read_ms());
+               adone=1;
+               asignalLED=1;
+               vsignalLED=0;
+                vpaceLED=0;
+                vpace=0;
+                apaceLED=0;
+                connected3=true;
+                connected4=false;
+                break;
+               }
+        
+        }
+            if(adone==0 && manuallyControlled==false)
+        {
+               //last=timea.read_ms();
+               //printf("Pacemaker-Apace Sent! Global Time : %d \n", stamp.read_ms());
+               //printf("Apace Sent! Time stamp: %d Global Time: %d \n", last, stamp.read_ms());
+               apaceLED=1;
+               apace=1;
+               vsignalLED=0;
+                vpaceLED=0;
+                vpace=0;
+                connected3=false;
+                connected4=false;              
+            }
+        adone=0;
+        timev.reset();        
+        
+        
+        
+        Model3da=1;
+        Model3dv=0;
+        
+        
+        while(timev.read_ms()<avimin);
+        while(timev.read_ms()>=avimin && timev.read_ms()<=avimax)
+        {
+            if(vsignal==1)
+            {
+               // printf("Pacemaker-Vsignal Received! Global Time : %d \n", stamp.read_ms());
+                //printf("VSignal Received! Time stamp: %d Global Time: %d \n", last, stamp.read_ms());
+                vsignalLED=1;
+                vdone=1;
+                asignalLED=0;
+                apaceLED=0;
+                apace=0;
+                vpaceLED=0;
+                connected4=true;
+                connected3=false;
+                break;
+            }        
+        }             
+            if(vdone==0 && manuallyControlled==false)
+        {
+               // printf("Pacemaker-VPace Sent! Global Time : %d \n", stamp.read_ms());
+                vpaceLED=1;
+                vpace=1;
+                asignalLED=0;
+                apaceLED=0;
+                apace=0;
+                connected3=false;
+                connected4=false;
+                //printf("Vpace Sent  Time stamp: %d Global Time: %d \n",timev.read_ms() + last, stamp.read_ms()); 
+        }
+        Model3da=0;
+        Model3dv=1;
+        timea.reset();
+        count++;
+        vdone=0;
+//        }
+}
+}
+
+
+
+void manuallyControlledFunc()
+{
+    char x;
+
+    if(manuallyControlled==true){
+        Thread::wait(1000);
+    apaceLED=0;
+    vpaceLED=0;
+    apace=0;
+    vpace=0;
+    printf("Press a for apace and v for v pace. Press e to exit.\n");
+    while(1){
+     if(pc.readable())
+     {
+         x=pc.getc();
+         switch(x){
+             case 'a': 
+                    //if(vdone_man==1){
+                    apace=1;
+                    apaceLED=1;
+                    //wait(0.01);
+                    //apace=0;
+                    //apaceLED=0;
+                    //adone_man=1;
+                    //vdone_man=0;
+                    //vpaceLED=0;
+                    vsignalLED=0;
+                    //asignalLED=0;
+                    vpace=0;
+                     vpaceLED=0;
+                     asignalLED=0;
+                    printf("APace Sent -- Manual\n");
+                    //}
+                    break;
+            case 'A': //if(vdone_man==1){
+                    apace=1;
+                    apaceLED=1;
+                    //wait(0.01);
+                    //apace=0;
+                    //apaceLED=0;
+                    //adone_man=1;
+                    //vdone_man=0;
+                    //vpaceLED=0;
+                    vsignalLED=0;
+                    //asignalLED=0;
+                    vpace=0;
+                     vpaceLED=0;
+                     asignalLED=0;
+                    printf("APace Sent -- Manual\n");
+                    //}
+                    break;
+            case 'v': 
+                    //if(adone_man==1){
+                    vpace=1;
+                    vpaceLED=1;
+                    //wait(0.01);
+                    //vpace=0;
+                    //vpaceLED=0;
+                    //vdone_man=1;
+                    //adone_man=0;
+                     apace=0;
+                     apaceLED=0;
+                    //vsignalLED=0;
+                     asignalLED=0;
+                    vsignalLED=0;
+                    printf("VPace Sent -- Manual\n");
+                    //}
+                    break;
+            case 'V': 
+                    //if(adone_man==1){
+                    vpace=1;
+                    vpaceLED=1;
+                    //wait(0.01);
+                    //vpace=0;
+                    //vpaceLED=0;
+                    //vdone_man=1;
+                    //adone_man=0;
+                    //apaceLED=0;
+                    //vsignalLED=0;
+                     asignalLED=0;
+                     vsignalLED=0;
+                     apace=0;
+                     apaceLED=0;
+                    printf("VPace Sent -- Manual\n");
+                    //}
+                    break;
+            case 'e':printf("Exiting manual\n");
+                    manuallyControlled=false;
+                    break; 
+                    
+            case 'E':printf("Exiting manual\n");
+                    manuallyControlled=false;
+                    break;
+            default: printf("Invalid input\n");
+                    break; 
+             
+             }
+             if(manuallyControlled==false)
+                break;
+             
+             }
+         
+         }
+     
+     }
+
+}
+
+
+
+void modeSwitchFunctionality(void const *n)
+{
+    char mode;
+    printf("Press n or N for normal mode\n");
+    printf("Press m or M for manual mode\n");
+    //printf("Press c or C for manually controlling pacemaker\n");
+    printf("Press s or S for sleep mode\n");
+    printf("Press e or E for exercise mode\n");
+    printf("Press o or O for Observation mode\n");
+    
+    while(1) 
+    { 
+           
+
+            if(pc.readable())
+        {
+            mode=pc.getc();
+                        
+            switch(mode)
+            {
+                case 'n':pc.printf("Mode switching to Normal Mode\n");
+                        currentMode=normal;
+                        
+                        break;
+                case 'N':pc.printf("Mode switching to Normal Mode\n");
+                        currentMode=normal;
+                        break;
+                //case 'm':pc.printf("Mode switching to Manual Mode\n");
+                //        currentMode=manual;
+                        //pc.printf("Control the pacemaker using manual mode\n");
+                        //manualMode();               
+               //         break;
+               // case 'M':pc.printf("Mode switching to Manual Mode\n");
+                        //currentMode=manual;
+                        //manualMode();
+               //         break;
+                case 's':pc.printf("Mode switching to Sleep Mode\n");
+                        currentMode=sleepm;
+                        break;
+                case 'S':pc.printf("Mode switching to Sleep Mode\n");
+                        currentMode=sleepm;
+                        break;
+                case 'e':pc.printf("Mode switching to Exercise Mode\n");
+                        currentMode=exercise;
+                        
+                        break;
+                case 'E':pc.printf("Mode switching to Exercise Mode\n");
+                        currentMode=exercise;
+                        break;
+                case 'o'://pc.printf("Mode switching to Exercise Mode\n");
+                         ObservationInterval();
+                        break;
+                case 'O'://pc.printf("Mode switching to Exercise Mode\n");
+                        ObservationInterval();
+                        break;
+                case 'm':pc.printf("Control Pacemaker Manually\n");
+                         manuallyControlled=true;
+                         manuallyControlledFunc();
+                        break;
+                case 'M':pc.printf("Control Pacemaker Manually\n");
+                        manuallyControlled=true;
+                        manuallyControlledFunc();
+                        break;
+                default: pc.printf("Kindly press valid commands!\n");                  
+                        break;
+            }
+
+            }    
+    
+        
+        
+    }
+    
+    
+}
+
+
+int main() 
+{
+    
+    
+    
+    //int currentMode=normal;
+    //Note: The threads are implemented for key functionalities of the pacemaker.
+    // Other minor functionalities are implemented as functions for faster implementation as said by TA's 
+    lcd.locate(0,0);
+    lcd.printf("For HR: Press O");
+    lcd.locate(0,1);
+    lcd.printf("Mode: Normal");
+    recAck.rise(&interruptTestingReq);
+    //Thread mav(&acceptAV);
+    //Thread mv(&acceptV);
+    Thread pacemaker(&pacemakerThread);
+    Thread buzzerThread(&buzzer_);
+    Thread modeSwitch(&modeSwitchFunctionality);
+    while(1){
+        ;
+        }
+    
+}
